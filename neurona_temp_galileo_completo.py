@@ -27,7 +27,7 @@ matplotlib.use("Agg")
 
 #  PARÁMETROS  (ajustá estos valores a tu gusto)
 URL       = "http://galileo4.unl.edu.ar/estacion/datos.txt"
-XLSX_FILE = r"C:\Users\HP\OneDrive\Desktop\...\historial_galileo.xlsx"
+XLSX_FILE = "historial_galileo.xlsx"
 
 POLL_INTERVAL = 60     # Intervalo de sondeo en segundos
 MIN_TRAIN_PTS = 288    # Mínimo de puntos para entrenamiento
