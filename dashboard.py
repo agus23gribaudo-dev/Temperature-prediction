@@ -384,13 +384,7 @@ if len(df_heat) >= 12:
 
 st.markdown("---")
 
-#  SECCIÓN 6: IMAGEN MATPLOTLIB (si existe)
-if os.path.exists(PNG_FILE):
-    st.subheader("🖼️ Gráfico en Tiempo Real (generado por el modelo)")
-    st.image(PNG_FILE, use_container_width=True)
-    st.markdown("---")
-
-#  SECCIÓN 7: TABLA DE DATOS RECIENTES
+#  SECCIÓN 6: TABLA DE DATOS RECIENTES
 with st.expander("📋 Ver últimos registros (datos crudos)", expanded=False):
     cols_mostrar = ["timestamp", "temp_real_C", "pred_5min", "pred_30min",
                     "pred_60min", "error_C", "rmse_ventana", "mae_ventana", "reentrenado"]
@@ -404,6 +398,6 @@ with st.expander("📋 Ver últimos registros (datos crudos)", expanded=False):
 #  PIE DE PÁGINA
 st.markdown(
     f"<p class='footer'>Fuente: http://galileo4.unl.edu.ar — "
-    f"Modelo: Neurona única | Actualización automática cada {INTERVALO_REFRESCO_SEG // 60} min</p>",
+    f"Modelo: Neurona única | Actualización automática cada | Gribado Agustín {INTERVALO_REFRESCO_SEG // 60} min</p>",
     unsafe_allow_html=True,
 )
