@@ -399,6 +399,6 @@ with st.expander("📋 Ver últimos registros (datos crudos)", expanded=False):
 #  PIE DE PÁGINA
 st.markdown(
     f"<p class='footer'>Fuente: http://galileo4.unl.edu.ar — "
-    f"Modelo: Neurona única | Actualización automática cada | Gribado Agustín {INTERVALO_REFRESCO_SEG // 60} min</p>",
+    f"Modelo: Neurona única | Actualización automática cada {INTERVALO_REFRESCO_SEG // 60} min</p> | Gribado Agustín" ,
     unsafe_allow_html=True,
 )
