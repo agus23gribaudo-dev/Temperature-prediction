@@ -20,10 +20,10 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 # Gráficos
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import matplotlib
 matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 
 #  PARÁMETROS  (ajustá estos valores a tu gusto)
 URL       = "http://galileo4.unl.edu.ar/estacion/datos.txt"
