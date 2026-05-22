@@ -129,7 +129,8 @@ PLOT_LAYOUT = dict(
     font=dict(color="#AAAAAA", size=11),
     xaxis=dict(
         gridcolor="#2A2D3A", showgrid=True,
-        tickformat="%H:%M", zeroline=False,
+        tickformat="%d/%m %H:%M",  
+        zeroline=False,
     ),
     yaxis=dict(
         gridcolor="#2A2D3A", showgrid=True,
