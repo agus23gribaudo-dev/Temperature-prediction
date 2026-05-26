@@ -1,7 +1,3 @@
-# Libreria para interpolar fillmissing
-# Porque la prediccion cuando acumula muchos datos decae la temperatura o predice siempre a menor temperatura?
-# Porque no re entrena
-
 # Extracción de datos
 import urllib.request # Para realizar solicitudes HTTP
 import re 
@@ -39,6 +35,7 @@ ERR_WINDOW    = 20     # Ventana de error
 RMSE_UMBRAL   = 1.0    # Umbral de RMSE
 N_PASOS       = 12     # Número de pasos a predecir (5, 10, 15, 20 min, etc.)
 N_ENTRADAS    = 6      # Cuántos valores pasados usa la neurona como entrada (6 × 5 min = 30 min de contexto)
+N_TIME_FEAT   = 2      # Características de tiempo: seno y coseno de la hora del día
 HIST_PLOT     = 36     # cuántos datos reales mostrar en el gráfico (36 × 5 min = 3 horas)
 
 PASO_MIN      = 5      # intervalo esperado entre mediciones en minutos
@@ -256,10 +253,15 @@ def guardar_fila(dt, temp_real, preds, error, rmse, mae, reentrenado):
     print("  [ERROR] No se pudo guardar tras 5 intentos. Cerrá el Excel y continuá.")
 
 #  ENTRENAMIENTO
-def entrenar(temps_array, Iter, w_init=None, b_init=0.0, verbose=True):
+def _time_features(dt):
+    """Devuelve [seno, coseno] de la hora del día para codificación cíclica."""
+    frac = (dt.hour * 60 + dt.minute) / (24 * 60)
+    return [math.sin(2 * math.pi * frac), math.cos(2 * math.pi * frac)]
+
+def entrenar(temps_array, tiempos_array, Iter, w_init=None, b_init=0.0, verbose=True):
     """
-    Entrena la neurona usando DIFERENCIAS de temperatura como entradas.
-    Cada fila de X es una ventana [ΔT(t-N+2), ..., ΔT(t)] (N_ENTRADAS deltas).
+    Entrena la neurona usando DIFERENCIAS de temperatura + hora del día como entradas.
+    Cada fila de X es [ΔT(t-N+2), ..., ΔT(t), sin(hora), cos(hora)] (N_ENTRADAS deltas + 2 feats de tiempo).
     El target y es ΔT(t+1) = T(t+1) - T(t).
     Para predecir la temperatura real: T(t+1) = T(t) + ΔT(t+1).
     Devuelve (w, b, d_min, d_max).
@@ -268,33 +270,41 @@ def entrenar(temps_array, Iter, w_init=None, b_init=0.0, verbose=True):
     deltas = np.diff(temp)   # ΔT(i) = T(i+1) - T(i), longitud = len(temp)-1
 
     # Construir ventanas de N_ENTRADAS deltas consecutivos
-    # X[i] = [Δ(i), Δ(i+1), ..., Δ(i+N_ENTRADAS-1)]
+    # X[i] = [Δ(i), ..., Δ(i+N_ENTRADAS-1), sin(hora[i+N]), cos(hora[i+N])]
     # y[i] = Δ(i+N_ENTRADAS)
     n = len(deltas) - N_ENTRADAS
-    X = np.array([deltas[i:i+N_ENTRADAS] for i in range(n)])
+    X_delta = np.array([deltas[i:i+N_ENTRADAS] for i in range(n)])
     y = deltas[N_ENTRADAS:]
 
     # Normalización MinMax sobre todos los deltas
     d_min, d_max = deltas.min(), deltas.max()
     rango = d_max - d_min if d_max != d_min else 1.0
 
-    X_norm = (X - d_min) / rango
+    X_norm = (X_delta - d_min) / rango
+
+    # Características de tiempo para cada muestra (hora del punto objetivo)
+    t_arr = list(tiempos_array)
+    X_time = np.array([_time_features(t_arr[i + N_ENTRADAS]) for i in range(n)])
+
+    # Combinar deltas normalizados + características de tiempo
+    X = np.hstack([X_norm, X_time])
     y_norm = (y - d_min) / rango
 
-    # Inicializar pesos
-    w = w_init if w_init is not None else np.zeros(N_ENTRADAS)
+    # Inicializar pesos (N_ENTRADAS deltas + N_TIME_FEAT)
+    n_w = N_ENTRADAS + N_TIME_FEAT
+    w = w_init if (w_init is not None and len(w_init) == n_w) else np.zeros(n_w)
     b = b_init
 
     if verbose:
-        print(f"  Entrenando neurona: {Iter} épocas  /  lr = {Lr}  /  entradas = {N_ENTRADAS} deltas")
+        print(f"  Entrenando neurona: {Iter} épocas  /  lr = {Lr}  /  entradas = {N_ENTRADAS} deltas + {N_TIME_FEAT} tiempo")
         print(f"  Rango deltas: [{d_min:.3f}, {d_max:.3f}] °C")
         print(f"  Pesos iniciales — w: {np.round(w, 4)}  b: {b:.6f}\n")
 
     for epoch in range(Iter):
-        y_pred = X_norm @ w + b
+        y_pred = X @ w + b
         error  = y_pred - y_norm
         loss   = np.mean(error ** 2)
-        dw     = (2 / n) * X_norm.T @ error
+        dw     = (2 / n) * X.T @ error
         db     = (2 / n) * np.sum(error)
         w -= Lr * dw
         b -= Lr * db
@@ -309,36 +319,39 @@ def entrenar(temps_array, Iter, w_init=None, b_init=0.0, verbose=True):
     return w, b, d_min, d_max
 
 #  PREDICCIÓN
-def predecir(ventana_deltas, w, b, d_min, d_max):
+def predecir(ventana_deltas, dt_actual, w, b, d_min, d_max):
     """
-    Dado un array de N_ENTRADAS deltas recientes, predice el próximo delta
-    y lo devuelve desnormalizado en °C.
+    Dado un array de N_ENTRADAS deltas recientes y el datetime del paso a predecir,
+    predice el próximo delta y lo devuelve desnormalizado en °C.
     """
     rango = d_max - d_min if d_max != d_min else 1.0
     ventana_norm = (np.array(ventana_deltas) - d_min) / rango
-    delta_norm   = np.dot(ventana_norm, w) + b # multiplica cada delta pasado por su peso correspondiente y suma todo
-    return float(delta_norm * rango + d_min) # desnormaliza el resultado para obtener el delta en °C
+    time_feat    = np.array(_time_features(dt_actual))
+    x            = np.concatenate([ventana_norm, time_feat])
+    delta_norm   = np.dot(x, w) + b
+    return float(delta_norm * rango + d_min)
 
-def predecir_n_pasos(temps, w, b, d_min, d_max):
+def predecir_n_pasos(temps, tiempos, w, b, d_min, d_max):
     """
-    Predicción iterativa N_PASOS hacia adelante usando deltas.
+    Predicción iterativa N_PASOS hacia adelante usando deltas + hora del día.
     - Arranca con la ventana de los últimos N_ENTRADAS deltas reales.
     - Cada paso predice ΔT, lo suma a la última temperatura conocida
       para obtener la temperatura absoluta, y actualiza la ventana.
     """
-    # Ventana inicial de deltas reales
     deltas_reales = np.diff(temps[-N_ENTRADAS - 1:])  # N_ENTRADAS deltas
-    ventana = deque(deltas_reales, maxlen=N_ENTRADAS) # ventana deslizante de deltas
+    ventana = deque(deltas_reales, maxlen=N_ENTRADAS)
 
     ultima_temp  = temps[-1]
+    dt_base      = tiempos[-1]
     predicciones = []
 
-    for _ in range(N_PASOS):
-        delta_pred  = predecir(list(ventana), w, b, d_min, d_max)
-        temp_pred   = ultima_temp + delta_pred # predice la temperatura absoluta
-        predicciones.append(temp_pred) 
-        ventana.append(delta_pred)   # el delta predicho entra a la ventana
-        ultima_temp = temp_pred      # la temp predicha es la base del siguiente paso
+    for i in range(N_PASOS):
+        dt_pred    = dt_base + timedelta(minutes=PASO_MIN * (i + 1))
+        delta_pred = predecir(list(ventana), dt_pred, w, b, d_min, d_max)
+        temp_pred  = ultima_temp + delta_pred
+        predicciones.append(temp_pred)
+        ventana.append(delta_pred)
+        ultima_temp = temp_pred
 
     return predicciones
 
@@ -509,14 +522,15 @@ if len(temps) < MIN_TRAIN_PTS:
             guardar_fila(dt_n, t_n, preds=NANS_6, error=float("nan"),
                          rmse=0.0, mae=0.0, reentrenado=False)
             temps.append(t_n)
+            tiempos.append(dt_n)
             ultimo_dt = dt_n
             print(f"  +dato ({len(temps)}/{MIN_TRAIN_PTS})  {dt_n}  T={t_n} °C")
 
 print(f"\nEntrenamiento inicial con {len(temps)} puntos ({Iter_init} épocas)…")
-w, b, d_min, d_max = entrenar(temps[-N_RETRAIN:], Iter_init, verbose=True)
+w, b, d_min, d_max = entrenar(temps[-N_RETRAIN:], tiempos[-N_RETRAIN:], Iter_init, verbose=True)
 
 # 4. Primera predicción
-preds      = predecir_n_pasos(temps, w, b, d_min, d_max)
+preds      = predecir_n_pasos(temps, tiempos, w, b, d_min, d_max)
 preds_prev = preds
 pred_sig   = preds[0]
 print(f"\n► Primeras predicciones desde T actual = {temps[-1]:.2f} °C:")
@@ -552,7 +566,7 @@ while True:
         print(f"\n*** RMSE={rmse:.3f} >= umbral {RMSE_UMBRAL} °C"
               f" → re-entrenando con {n_pts} puntos ({Iter_retrain} épocas) ***")
         w, b, d_min, d_max = entrenar(
-            temps[-N_RETRAIN:], Iter_retrain, w_init=w, b_init=b, verbose=False)
+            temps[-N_RETRAIN:], tiempos[-N_RETRAIN:], Iter_retrain, w_init=w, b_init=b, verbose=False)
         reentrenado = True
 
     guardar_fila(dt_n, t_n, preds_prev, error_ciclo, rmse, mae, reentrenado)
@@ -569,7 +583,7 @@ while True:
 
     ultimo_dt = dt_n
 
-    preds      = predecir_n_pasos(temps, w, b, d_min, d_max)
+    preds      = predecir_n_pasos(temps, tiempos, w, b, d_min, d_max)
     preds_prev = preds
     pred_sig   = preds[0]
 
@@ -584,6 +598,9 @@ while True:
         marca_paso = " ◄ referencia" if i == 1 else ""
         print(f"     +{i*5:2d} min  [{dt_n.strftime('%H:%M')} +{i*5:2d}']  →  {p:.2f} °C{marca_paso}")
     print("─" * 62)
+
+    # Actualizar gráfico con los nuevos datos
+    graficar(tiempos, temps, dt_n, preds, rmse)
 
     # Actualizar gráfico con los nuevos datos
     graficar(tiempos, temps, dt_n, preds, rmse)
